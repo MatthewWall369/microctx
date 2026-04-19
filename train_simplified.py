@@ -8,7 +8,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import numpy as np
 import tensorflow as tf
 from tensorflow import keras
-#from simplified import build_model, bytes_to_dataset
+from simplified import build_model, bytes_to_dataset
 
 # ── config ────────────────────────────────────────────────────────────────────
 W        = 3
@@ -21,19 +21,28 @@ BATCH    = 64
 
 TRAIN_STRIDE = SEQ_LEN
 VAL_STRIDE   = SEQ_LEN
+DATA_PATH    = None   # set to a file path to train on your own dataset
 
 # ── data ──────────────────────────────────────────────────────────────────────
-path = keras.utils.get_file(
-    'shakespeare.txt',
-    'https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt'
+if DATA_PATH and os.path.isfile(DATA_PATH):
+    raw = np.memmap(DATA_PATH, dtype=np.uint8, mode='r')
+    split = int(len(raw) * 0.9)
+    train_src, val_src = raw[:split], raw[split:]
+    val_text = bytes(val_src).decode('utf-8', errors='replace')
+else:
+    path = keras.utils.get_file(
+        'shakespeare.txt',
+        'https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinyshakespeare/input.txt'
+    )
+    text = open(path).read()
+    split = int(len(text) * 0.9)
+    train_src, val_text = text[:split], text[split:]
+    val_src = val_text
+
+train_ds, num_windows = bytes_to_dataset(
+    train_src, seq_len=SEQ_LEN, stride=TRAIN_STRIDE, batch_size=BATCH
 )
-
-text  += open(path).read()
-split = int(len(text) * 0.9)
-train_text, val_text = text[:split], text[split:]
-
-train_ds = bytes_to_dataset(train_text, seq_len=SEQ_LEN, stride=TRAIN_STRIDE, batch_size=BATCH)
-print(f'Seq len: {SEQ_LEN} | W={W} | Dim={DIM}')
+print(f'Seq len: {SEQ_LEN} | W={W} | Dim={DIM} | Windows: {num_windows:,}')
 
 num_passes = 0
 d = 1
@@ -61,7 +70,10 @@ import time
 print('\n\n-- Extrapolation Test --')
 print(f'Trained on seq_len={SEQ_LEN}\n')
 
-raw = np.frombuffer(val_text.encode('utf-8'), dtype=np.uint8)
+if isinstance(val_src, np.ndarray):
+    raw = np.array(val_src, dtype=np.uint8)
+else:
+    raw = np.frombuffer(val_text.encode('utf-8'), dtype=np.uint8)
 
 for test_len in [256, 1_000, 10_000, 100_000, 500_000]:
     if test_len + 1 > len(raw):

@@ -157,19 +157,73 @@ def build_model(dim=256, W=3, dropout=0.1):
     return model
 
 
-def bytes_to_dataset(text, seq_len=256, stride=None, batch_size=32):
+def bytes_to_dataset(source, seq_len=256, stride=None, batch_size=32,
+                      shuffle_buffer=None):
+    """
+    Memory-efficient tf.data pipeline for byte-level LM training.
+
+    source: str (raw text), bytes, file path, or 1-D uint8 numpy array.
+    Returns (dataset, num_windows).
+    """
+    import os
     if stride is None:
         stride = seq_len
-    raw = np.frombuffer(text.encode('utf-8'), dtype=np.uint8)
-    xs, ys = [], []
-    for i in range(0, len(raw) - seq_len, stride):
-        xs.append(raw[i:i + seq_len])
-        ys.append(raw[i + 1:i + seq_len + 1])
-    xs = np.array(xs, dtype=np.int32)
-    ys = np.array(ys, dtype=np.int32)
-    ds = tf.data.Dataset.from_tensor_slices((xs, ys))
-    ds = ds.shuffle(1000).batch(batch_size).prefetch(tf.data.AUTOTUNE)
-    return ds
+
+    if isinstance(source, (str, os.PathLike)) and os.path.isfile(str(source)):
+        raw = np.memmap(str(source), dtype=np.uint8, mode='r')
+    elif isinstance(source, str):
+        raw = np.frombuffer(source.encode('utf-8'), dtype=np.uint8)
+    elif isinstance(source, (bytes, bytearray)):
+        raw = np.frombuffer(bytes(source), dtype=np.uint8)
+    else:
+        raw = np.asarray(source, dtype=np.uint8)
+
+    n = len(raw)
+    num_windows = max(0, (n - seq_len) // stride)
+    if shuffle_buffer is None:
+        shuffle_buffer = min(num_windows, 100_000)
+
+    stride_c = tf.constant(stride, dtype=tf.int64)
+    seq_c    = tf.constant(seq_len, dtype=tf.int64)
+
+    try:
+        data = tf.constant(raw, dtype=tf.uint8)
+
+        @tf.function
+        def _slice(idx):
+            start = idx * stride_c
+            x = tf.cast(data[start:start + seq_c], tf.int32)
+            y = tf.cast(data[start + 1:start + seq_c + 1], tf.int32)
+            x = tf.ensure_shape(x, (seq_len,))
+            y = tf.ensure_shape(y, (seq_len,))
+            return x, y
+
+        ds = tf.data.Dataset.range(num_windows)
+        ds = ds.shuffle(shuffle_buffer)
+        ds = ds.map(_slice, num_parallel_calls=tf.data.AUTOTUNE)
+
+    except (tf.errors.ResourceExhaustedError, MemoryError):
+        # Dataset too large for a single TF constant — fall back to
+        # mmap reads via py_function (works for arbitrarily large files).
+        def _read_window(idx):
+            i = idx.numpy() * stride
+            x = raw[i:i + seq_len].astype(np.int32)
+            y = raw[i + 1:i + seq_len + 1].astype(np.int32)
+            return x, y
+
+        def _tf_read(idx):
+            x, y = tf.py_function(_read_window, [idx], [tf.int32, tf.int32])
+            x.set_shape((seq_len,))
+            y.set_shape((seq_len,))
+            return x, y
+
+        ds = tf.data.Dataset.range(num_windows)
+        ds = ds.shuffle(shuffle_buffer)
+        ds = ds.map(_tf_read, num_parallel_calls=tf.data.AUTOTUNE)
+
+    ds = ds.batch(batch_size, drop_remainder=True)
+    ds = ds.prefetch(tf.data.AUTOTUNE)
+    return ds, num_windows
 
 
 if __name__ == '__main__':
