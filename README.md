@@ -84,6 +84,7 @@ Trained on `seq_len=128`, the model maintains stable perplexity when evaluated o
 | 1,000 tokens   | 4.03      | 1.3935 | 7      | 0.1s  |
 | 10,000 tokens  | 3.84      | 1.3451 | 9      | 0.2s  |
 | 100,000 tokens | 4.65      | 1.5372 | 11     | 1.0s  |
+| 500,000 tokens | 4.40      | 1.4816 | 12     | 5.2s  |
 
 The recursive dilation scheme naturally extends to longer sequences by simply adding more passes — no retraining or positional encoding adjustments needed.
 
