@@ -76,7 +76,7 @@ All hyperparameters are configured at the top of `train_simplified.py`:
 
 ## Extrapolation Results
 
-Trained on `seq_len=128`, the model maintains stable perplexity when evaluated on sequences up to **780x longer** than training:
+Trained on `seq_len=128`, the model maintains stable perplexity when evaluated on sequences up to **780x longer** than training (wikitext-103):
 
 | Context Length | Perplexity | Loss   | Passes | Time  |
 |----------------|-----------|--------|--------|-------|
